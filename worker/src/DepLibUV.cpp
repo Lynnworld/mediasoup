@@ -39,6 +39,10 @@ void onCloseAsync(uv_handle_t* handle)
 
 static void runTasks(uv_async_t* handle)
 {
+	if (handle->data == nullptr)
+	{
+		return;
+	}
 	auto taskQueue = reinterpret_cast<DepLibUV::AsyncTaskQueue*>(handle->data);
 	taskQueue->RunTask();
 }
@@ -57,10 +61,6 @@ void DepLibUV::ClassInit()
 	{
 		MS_ABORT("libuv loop initialization failed");
 	}
-
-	uv_async_t* aync    = new uv_async_t();
-	DepLibUV::taskQueue = new DepLibUV::AsyncTaskQueue(aync);
-	aync->data          = static_cast<void*>(DepLibUV::taskQueue);
 }
 
 void DepLibUV::ClassDestroy()
@@ -118,11 +118,22 @@ void DepLibUV::RunLoop()
 	MS_ASSERT(ret == 0, "uv_run() returned %s", uv_err_name(ret));
 }
 
+DepLibUV::AsyncTaskQueue* DepLibUV::GetTaskQueue()
+{
+	if (DepLibUV::taskQueue == nullptr)
+	{
+		DepLibUV::taskQueue = new DepLibUV::AsyncTaskQueue(new uv_async_t);
+	}
+
+	return DepLibUV::taskQueue;
+}
+
 /* Instance methods. */
 
 DepLibUV::AsyncTaskQueue::AsyncTaskQueue(uv_async_t* async) : uvAsyncHandle_(async)
 {
-	uv_async_init(DepLibUV::loop, this->uvAsyncHandle_, runTasks);
+	async->data = static_cast<void*>(this);
+	uv_async_init(DepLibUV::loop, async, runTasks);
 }
 
 DepLibUV::AsyncTaskQueue::~AsyncTaskQueue()

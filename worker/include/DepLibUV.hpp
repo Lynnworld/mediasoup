@@ -57,10 +57,7 @@ public:
 		return static_cast<int64_t>(DepLibUV::GetTimeUs());
 	}
 
-	static AsyncTaskQueue* GetTaskQueue()
-	{
-		return DepLibUV::taskQueue;
-	}
+	static AsyncTaskQueue* GetTaskQueue();
 
 private:
 	thread_local static uv_loop_t* loop;
