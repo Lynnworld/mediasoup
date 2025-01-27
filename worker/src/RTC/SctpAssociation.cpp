@@ -40,9 +40,10 @@ inline static int onRecvSctpData(
   int flags,
   void* ulpInfo)
 {
-	auto* sctpAssociation = DepUsrSCTP::RetrieveSctpAssociation(reinterpret_cast<uintptr_t>(ulpInfo));
+	auto sctpAssociationPair =
+	  DepUsrSCTP::RetrieveSctpAssociation(reinterpret_cast<uintptr_t>(ulpInfo));
 
-	if (!sctpAssociation)
+	if (!sctpAssociationPair.first)
 	{
 		MS_WARN_TAG(sctp, "no SctpAssociation found");
 
@@ -51,6 +52,7 @@ inline static int onRecvSctpData(
 		return 0;
 	}
 
+	auto sctpAssociation = sctpAssociationPair.first;
 	if (flags & MSG_NOTIFICATION)
 	{
 		sctpAssociation->OnUsrSctpReceiveSctpNotification(
@@ -85,15 +87,17 @@ inline static int onRecvSctpData(
 
 inline static int onSendSctpData(struct socket* /*sock*/, uint32_t freeBuffer, void* ulpInfo)
 {
-	auto* sctpAssociation = DepUsrSCTP::RetrieveSctpAssociation(reinterpret_cast<uintptr_t>(ulpInfo));
+	auto sctpAssociationPair =
+	  DepUsrSCTP::RetrieveSctpAssociation(reinterpret_cast<uintptr_t>(ulpInfo));
 
-	if (!sctpAssociation)
+	if (!sctpAssociationPair.first)
 	{
 		MS_WARN_TAG(sctp, "no SctpAssociation found");
 
 		return 0;
 	}
 
+	auto sctpAssociation = sctpAssociationPair.first;
 	sctpAssociation->OnUsrSctpSentData(freeBuffer);
 
 	return 1;

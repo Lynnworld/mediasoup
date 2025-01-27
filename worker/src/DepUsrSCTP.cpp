@@ -5,7 +5,6 @@
 #ifdef MS_LIBURING_SUPPORTED
 #include "DepLibUring.hpp"
 #endif
-#include "DepLibUV.hpp"
 #include "Logger.hpp"
 #include <usrsctp.h>
 #include <cstdio> // std::vsnprintf()
@@ -21,17 +20,33 @@ static size_t GlobalInstances{ 0u };
 
 inline static int onSendSctpData(void* addr, void* data, size_t len, uint8_t /*tos*/, uint8_t /*setDf*/)
 {
-	auto* sctpAssociation = DepUsrSCTP::RetrieveSctpAssociation(reinterpret_cast<uintptr_t>(addr));
+	auto sctpAssociationPair = DepUsrSCTP::RetrieveSctpAssociation(reinterpret_cast<uintptr_t>(addr));
 
-	if (!sctpAssociation)
+	if (!sctpAssociationPair.first)
 	{
 		MS_WARN_TAG(sctp, "no SctpAssociation found");
 
 		return -1;
 	}
+	if (sctpAssociationPair.second == DepLibUV::GetTaskQueue())
+	{
+		auto sctpAssociation = sctpAssociationPair.first;
+		sctpAssociation->OnUsrSctpSendSctpData(data, len);
+	}
+	else
+	{
+		// Post the task to the correct task queue.
+		auto sctpAssociation = sctpAssociationPair.first;
+		void* dataCopy       = new uint8_t[len];
+		std::memmove(dataCopy, data, len);
 
-	sctpAssociation->OnUsrSctpSendSctpData(data, len);
-
+		sctpAssociationPair.second->PostTask(
+		  [sctpAssociation, dataCopy, len]()
+		  {
+			  sctpAssociation->OnUsrSctpSendSctpData(dataCopy, len);
+			  delete[] static_cast<uint8_t*>(dataCopy);
+		  });
+	}
 	// NOTE: Must not free data, usrsctp lib does it.
 
 	return 0;
@@ -59,7 +74,8 @@ inline static void sctpDebug(const char* format, ...)
 thread_local DepUsrSCTP::Checker* DepUsrSCTP::checker{ nullptr };
 uint64_t DepUsrSCTP::numSctpAssociations{ 0u };
 uintptr_t DepUsrSCTP::nextSctpAssociationId{ 0u };
-absl::flat_hash_map<uintptr_t, RTC::SctpAssociation*> DepUsrSCTP::mapIdSctpAssociation;
+absl::flat_hash_map<uintptr_t, std::pair<RTC::SctpAssociation*, DepLibUV::AsyncTaskQueue*>>
+  DepUsrSCTP::mapIdSctpAssociation;
 
 /* Static methods. */
 
@@ -164,7 +180,8 @@ void DepUsrSCTP::RegisterSctpAssociation(RTC::SctpAssociation* sctpAssociation)
 	  it == DepUsrSCTP::mapIdSctpAssociation.end(),
 	  "the id of the SctpAssociation is already in the map");
 
-	DepUsrSCTP::mapIdSctpAssociation[sctpAssociation->id] = sctpAssociation;
+	DepUsrSCTP::mapIdSctpAssociation[sctpAssociation->id] =
+	  std::make_pair(sctpAssociation, DepLibUV::GetTaskQueue());
 
 	if (++DepUsrSCTP::numSctpAssociations == 1u)
 	{
@@ -191,7 +208,8 @@ void DepUsrSCTP::DeregisterSctpAssociation(RTC::SctpAssociation* sctpAssociation
 	}
 }
 
-RTC::SctpAssociation* DepUsrSCTP::RetrieveSctpAssociation(uintptr_t id)
+std::pair<RTC::SctpAssociation*, DepLibUV::AsyncTaskQueue*> DepUsrSCTP::RetrieveSctpAssociation(
+  uintptr_t id)
 {
 	MS_TRACE();
 
@@ -201,7 +219,7 @@ RTC::SctpAssociation* DepUsrSCTP::RetrieveSctpAssociation(uintptr_t id)
 
 	if (it == DepUsrSCTP::mapIdSctpAssociation.end())
 	{
-		return nullptr;
+		return std::make_pair(nullptr, nullptr);
 	}
 
 	return it->second;

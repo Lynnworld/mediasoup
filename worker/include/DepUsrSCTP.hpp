@@ -2,6 +2,7 @@
 #define MS_DEP_USRSCTP_HPP
 
 #include "common.hpp"
+#include "DepLibUV.hpp"
 #include "RTC/SctpAssociation.hpp"
 #include "handles/TimerHandle.hpp"
 #include <absl/container/flat_hash_map.h>
@@ -36,13 +37,15 @@ public:
 	static uintptr_t GetNextSctpAssociationId();
 	static void RegisterSctpAssociation(RTC::SctpAssociation* sctpAssociation);
 	static void DeregisterSctpAssociation(RTC::SctpAssociation* sctpAssociation);
-	static RTC::SctpAssociation* RetrieveSctpAssociation(uintptr_t id);
+	static std::pair<RTC::SctpAssociation*, DepLibUV::AsyncTaskQueue*> RetrieveSctpAssociation(
+	  uintptr_t id);
 
 private:
 	thread_local static Checker* checker;
 	static uint64_t numSctpAssociations;
 	static uintptr_t nextSctpAssociationId;
-	static absl::flat_hash_map<uintptr_t, RTC::SctpAssociation*> mapIdSctpAssociation;
+	static absl::flat_hash_map<uintptr_t, std::pair<RTC::SctpAssociation*, DepLibUV::AsyncTaskQueue*>>
+	  mapIdSctpAssociation;
 };
 
 #endif

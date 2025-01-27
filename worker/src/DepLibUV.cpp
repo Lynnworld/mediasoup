@@ -7,6 +7,7 @@
 /* Static variables. */
 
 thread_local uv_loop_t* DepLibUV::loop{ nullptr };
+thread_local DepLibUV::AsyncTaskQueue* DepLibUV::taskQueue{ nullptr };
 
 /* Static methods for UV callbacks. */
 
@@ -31,6 +32,17 @@ inline static void onWalk(uv_handle_t* handle, void* /*arg*/)
 	}
 }
 
+void onCloseAsync(uv_handle_t* handle)
+{
+	delete handle;
+}
+
+static void runTasks(uv_async_t* handle)
+{
+	auto taskQueue = reinterpret_cast<DepLibUV::AsyncTaskQueue*>(handle->data);
+	taskQueue->RunTask();
+}
+
 /* Static methods. */
 
 void DepLibUV::ClassInit()
@@ -45,6 +57,10 @@ void DepLibUV::ClassInit()
 	{
 		MS_ABORT("libuv loop initialization failed");
 	}
+
+	uv_async_t* aync    = new uv_async_t();
+	DepLibUV::taskQueue = new DepLibUV::AsyncTaskQueue(aync);
+	aync->data          = static_cast<void*>(DepLibUV::taskQueue);
 }
 
 void DepLibUV::ClassDestroy()
@@ -57,6 +73,8 @@ void DepLibUV::ClassDestroy()
 	// More context: https://github.com/versatica/mediasoup/pull/576
 
 	int err;
+
+	delete DepLibUV::taskQueue;
 
 	uv_stop(DepLibUV::loop);
 	uv_walk(DepLibUV::loop, onWalk, nullptr);
@@ -98,4 +116,41 @@ void DepLibUV::RunLoop()
 	const int ret = uv_run(DepLibUV::loop, UV_RUN_DEFAULT);
 
 	MS_ASSERT(ret == 0, "uv_run() returned %s", uv_err_name(ret));
+}
+
+/* Instance methods. */
+
+DepLibUV::AsyncTaskQueue::AsyncTaskQueue(uv_async_t* async) : uvAsyncHandle_(async)
+{
+	uv_async_init(DepLibUV::loop, this->uvAsyncHandle_, runTasks);
+}
+
+DepLibUV::AsyncTaskQueue::~AsyncTaskQueue()
+{
+	uv_close(reinterpret_cast<uv_handle_t*>(this->uvAsyncHandle_), onCloseAsync);
+}
+
+void DepLibUV::AsyncTaskQueue::PostTask(std::function<void()> task)
+{
+	std::lock_guard<std::mutex> lock(this->lock_);
+
+	this->tasks_.push(task);
+
+	uv_async_send(this->uvAsyncHandle_);
+}
+
+void DepLibUV::AsyncTaskQueue::RunTask()
+{
+	std::lock_guard<std::mutex> lock(this->lock_);
+
+	if (this->tasks_.empty())
+	{
+		return;
+	}
+	while (!this->tasks_.empty())
+	{
+		auto task = this->tasks_.front();
+		this->tasks_.pop();
+		task();
+	}
 }

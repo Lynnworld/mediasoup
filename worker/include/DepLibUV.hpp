@@ -3,9 +3,26 @@
 
 #include "common.hpp"
 #include <uv.h>
+#include <mutex>
+#include <queue>
 
 class DepLibUV
 {
+public:
+	class AsyncTaskQueue
+	{
+	public:
+		AsyncTaskQueue(uv_async_t* async);
+		~AsyncTaskQueue();
+		void PostTask(std::function<void()> task);
+		void RunTask();
+
+	private:
+		std::queue<std::function<void()>> tasks_;
+		std::mutex lock_;
+		uv_async_t* uvAsyncHandle_{ nullptr };
+	};
+
 public:
 	static void ClassInit();
 	static void ClassDestroy();
@@ -40,8 +57,14 @@ public:
 		return static_cast<int64_t>(DepLibUV::GetTimeUs());
 	}
 
+	static AsyncTaskQueue* GetTaskQueue()
+	{
+		return DepLibUV::taskQueue;
+	}
+
 private:
 	thread_local static uv_loop_t* loop;
+	thread_local static AsyncTaskQueue* taskQueue;
 };
 
 #endif
